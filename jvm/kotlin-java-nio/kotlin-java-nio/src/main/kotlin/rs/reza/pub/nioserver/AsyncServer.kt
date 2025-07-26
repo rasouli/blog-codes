@@ -25,8 +25,6 @@ object AsyncServer {
 
     private val asyncChannelGroupThreadPool = Executors.newFixedThreadPool(2)
     private val asyncChannelGroupDispatcher = asyncChannelGroupThreadPool.asCoroutineDispatcher()
-    private val ioDispatcher = Dispatchers.IO
-    private val defaultDispatcher = Dispatchers.Default
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -50,7 +48,7 @@ object AsyncServer {
                     logger.info("accepted a new connection from client at ${clientChannel.remoteAddress}")
                     launch {
                         val coroutineName = CoroutineName("client_${clientChannel.remoteAddress}")
-                        withContext(defaultDispatcher + coroutineName) {
+                        withContext(asyncChannelGroupDispatcher + coroutineName) {
                             processClientChannel(clientChannel)
                         }
                     }

@@ -24,8 +24,9 @@ object AsyncServer {
     private val SOCKET_RECIEVE_BUFFER_SIZE = 1024
 
     private val asyncChannelGroupThreadPool = Executors.newFixedThreadPool(2)
+    private val asyncChannelGroupDispatcher = asyncChannelGroupThreadPool.asCoroutineDispatcher()
     private val ioDispatcher = Dispatchers.IO
-    private val applicationDispatcher = Dispatchers.Default
+    private val defaultDispatcher = Dispatchers.Default
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -36,26 +37,25 @@ object AsyncServer {
 
     suspend fun run() = coroutineScope {
         val address = InetSocketAddress(HOST, PORT)
-        val asyncServerSocketChannel = withContext(applicationDispatcher) {
-            val asynchronousChannelGroup = AsynchronousChannelGroup.withThreadPool(asyncChannelGroupThreadPool)
-            listen(address = address, group = asynchronousChannelGroup)
-        }
+        // we can ignore the cost of setting up the asynchronous channel group.
+        val asynchronousChannelGroup = AsynchronousChannelGroup.withThreadPool(asyncChannelGroupThreadPool)
+        val asyncServerSocketChannel = listen(address = address, group = asynchronousChannelGroup)
 
-        withContext(applicationDispatcher) {
-            asyncServerSocketChannel.use { serverSocketChannel ->
-                while (serverSocketChannel.isOpen) {
-                    try {
-                        val clientChannel = serverSocketChannel.acceptAsync()
-                        logger.info("accepted a new connection from client at ${clientChannel.remoteAddress}")
-                        launch {
-                            val coroutineName = CoroutineName("client_${clientChannel.remoteAddress}")
-                            withContext(ioDispatcher + coroutineName) {
-                                processClientChannel(clientChannel)
-                            }
-                        }
-                    } catch (ex: Exception) {
-                        logger.error("exception while accepting new connections", ex)
+        asyncServerSocketChannel.use { serverSocketChannel ->
+            while (serverSocketChannel.isOpen) {
+                try {
+                    val clientChannel = withContext(asyncChannelGroupDispatcher) {
+                        serverSocketChannel.acceptAsync()
                     }
+                    logger.info("accepted a new connection from client at ${clientChannel.remoteAddress}")
+                    launch {
+                        val coroutineName = CoroutineName("client_${clientChannel.remoteAddress}")
+                        withContext(defaultDispatcher + coroutineName) {
+                            processClientChannel(clientChannel)
+                        }
+                    }
+                } catch (ex: Exception) {
+                    logger.error("exception while accepting new connections", ex)
                 }
             }
         }
@@ -68,12 +68,12 @@ object AsyncServer {
         clientSocketChannel.use {
             try {
                 val readCoroutine = launch {
-                    withContext(ioDispatcher) {
+                    withContext(asyncChannelGroupDispatcher) {
                         read(clientSocketChannel, bufferChannel)
                     }
                 }
                 val writeCoroutine = launch {
-                    withContext(ioDispatcher) {
+                    withContext(asyncChannelGroupDispatcher) {
                         write(clientSocketChannel, bufferChannel)
                     }
                 }
